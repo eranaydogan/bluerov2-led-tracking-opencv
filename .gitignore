@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.sln
+*.pyproj
+*.user
+
+# Datasets and generated outputs
+datasets/*
+!datasets/.gitkeep
+
+outputs/*
+!outputs/.gitkeep
+
+# Unity / OpenCV generated data
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
