@@ -521,3 +521,49 @@ The next development steps are:
 4. Later convert JSON to a compact binary packet if latency or bandwidth becomes a problem.
 5. Extend the method from the back-only case to multi-face views.
 6. For diagonal views, generate one observation per visible face instead of averaging all LEDs into a single global point.
+
+
+## UDP Observation Packet Localhost Test
+
+### Goal
+
+The goal of this step was to verify that the controller-ready JSON observation packet can be sent and received over UDP before integrating with the Linux-side controller.
+
+### Test Setup
+
+* Sender script: `09_udp_send_observation.py`
+* Receiver script: `10_udp_receive_observation.py`
+* Dataset: `BackOnly_Test_04`
+* Selected frame: `120`
+* Destination IP: `127.0.0.1`
+* UDP port: `5005`
+* Packet count: `10`
+* Send rate: `10 Hz`
+
+### Sent Observation
+
+The transmitted packet contained the following key fields:
+
+```text
+valid: True
+face_id: BACK
+pattern_accuracy: 1.0
+bit_error_rate: 0.0
+error_norm: [-0.0729, -0.0287]
+ray_cam: [-0.0746, -0.0165, 0.9971]
+pixel_distance: 74.0068
+estimated_distance: 2.8881
+distance_confidence: 1.0
+```
+
+### Result
+
+The receiver successfully received and parsed all 10 UDP packets.
+
+The sequence numbers increased from `0` to `9`, and the received observation fields matched the sent JSON packet.
+
+The localhost latency was approximately below 1 ms.
+
+### Conclusion
+
+The local UDP transmission test was successful. The JSON-based observation packet is now ready for Windows-to-Linux network testing before being connected to the actual controller.
