@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATASET_NAME = "BackOnly_Test_01"
+DATASET_NAME = "BackOnly_Test_04"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +35,8 @@ ON_AREA_THRESHOLD = 35
 
 SHOW_PREVIEW = True
 DISPLAY_SCALE = 0.5
+
+CAMERA_VERTICAL_FOV_DEG = 60.0
 
 frame_paths = sorted(glob.glob(str(FRAME_FOLDER / "*.png")))
 
@@ -105,7 +107,12 @@ for frame_index, path in enumerate(frame_paths):
     if frame is None:
         continue
 
+    image_height, image_width = frame.shape[:2]
+    image_center_x = image_width / 2.0
+    image_center_y = image_height / 2.0
+
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
 
     candidates, mask_clean = find_led_candidates(hsv)
 
@@ -119,6 +126,14 @@ for frame_index, path in enumerate(frame_paths):
     led2_y = None
     pixel_distance = None
 
+    mid_x = None
+    mid_y = None
+    error_x = None
+    error_y = None
+    ray_x = None
+    ray_y = None
+    ray_z = None
+
     if len(candidates) >= 2:
         c1 = candidates[0]
         c2 = candidates[1]
@@ -129,6 +144,27 @@ for frame_index, path in enumerate(frame_paths):
         led2_y = c2["cy"]
 
         pixel_distance = math.sqrt((led1_x - led2_x) ** 2 + (led1_y - led2_y) ** 2)
+
+        mid_x = (led1_x + led2_x) / 2.0
+        mid_y = (led1_y + led2_y) / 2.0
+
+        error_x = (mid_x - image_center_x) / image_center_x
+        error_y = (image_center_y - mid_y) / image_center_y
+        vertical_fov_rad = math.radians(CAMERA_VERTICAL_FOV_DEG)
+
+        fy = (image_height / 2.0) / math.tan(vertical_fov_rad / 2.0)
+        fx = fy
+
+        x_cam = (mid_x - image_center_x) / fx
+        y_cam = (image_center_y - mid_y) / fy
+        z_cam = 1.0
+
+        norm = math.sqrt(x_cam ** 2 + y_cam ** 2 + z_cam ** 2)
+
+        ray_x = x_cam / norm
+        ray_y = y_cam / norm
+        ray_z = z_cam / norm
+
         pair_found = 1
 
     records.append({
@@ -142,7 +178,17 @@ for frame_index, path in enumerate(frame_paths):
         "led1_y": led1_y,
         "led2_x": led2_x,
         "led2_y": led2_y,
-        "pixel_distance": pixel_distance
+        "pixel_distance": pixel_distance,
+        "mid_x": mid_x,
+        "mid_y": mid_y,
+        "error_x": error_x,
+        "error_y": error_y,
+        "ray_x": ray_x,
+        "ray_y": ray_y,
+        "ray_z": ray_z,
+        "camera_vertical_fov_deg": CAMERA_VERTICAL_FOV_DEG,
+        "image_width": image_width,
+        "image_height": image_height
     })
 
     if SHOW_PREVIEW:
@@ -174,6 +220,35 @@ for frame_index, path in enumerate(frame_paths):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (255, 0, 0),
+                2
+            )
+
+            cv2.circle(output, (int(mid_x), int(mid_y)), 6, (255, 255, 255), -1)
+
+            cv2.line(
+                output,
+                (int(image_center_x), int(image_center_y)),
+                (int(mid_x), int(mid_y)),
+                (0, 255, 255),
+                2
+            )
+
+            cv2.putText(
+                output,
+                f"err_x:{error_x:.3f} err_y:{error_y:.3f}",
+                (30, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2
+            )
+            cv2.putText(
+                output,
+                f"ray:[{ray_x:.3f},{ray_y:.3f},{ray_z:.3f}]",
+                (30, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
                 2
             )
 
