@@ -2,7 +2,9 @@
 
 This repository contains the Python/OpenCV scripts and Unity LED control script used for testing a LED-based visual tracking approach for BlueROV2.
 
-The goal is to detect LED patterns from Unity-rendered image sequences, identify the visible robot face, and estimate relative distance using the pixel distance between two LEDs on the same face.
+The goal is to detect LED patterns from Unity-rendered image sequences, identify the visible robot face, estimate relative distance using the pixel distance between two LEDs on the same face, and generate controller-ready observation packets for the Linux-side control module.
+
+---
 
 ## Project Goal
 
@@ -13,13 +15,18 @@ The BlueROV2 model has 8 LEDs in total:
 * 2 LEDs on the left face
 * 2 LEDs on the right face
 
-Each face emits a unique binary pattern. The two LEDs on the same face use the same pattern and the same phase. This allows the vision system to:
+Each face emits a unique binary pattern. The two LEDs on the same face use the same pattern and the same phase.
+
+This allows the vision system to:
 
 1. detect candidate LED blobs,
 2. decode the temporal blink pattern,
 3. verify the visible face,
 4. find the two LEDs belonging to the same face,
-5. estimate distance using the pixel distance between the two LEDs.
+5. compute the midpoint of the LED pair,
+6. calculate image-center alignment error,
+7. estimate distance using the pixel distance between the two LEDs,
+8. generate a controller-ready observation packet.
 
 Color is used only as an initial candidate detection cue. It is not treated as the primary decision factor because HSV-based color detection is sensitive to underwater lighting, bloom, reflections, camera angle, and distance.
 
@@ -30,44 +37,52 @@ The main verification layers are:
 3. temporal stability,
 4. color consistency as a secondary cue.
 
-## Current Milestone
+---
 
-The first controlled test focuses only on the back face of the robot.
+## Current Development Stage
 
-Test setup:
+The current controlled test focuses on the back face of the robot.
 
-* Active face: back only
-* LED color: green
-* Pattern: `11001100`
-* FPS: 60
-* Bit duration: 0.1 s
-* Frames per bit: 6
-* Dataset: `BackOnly_Test_01`
-* Number of frames: 601
+This is the most important initial case because the main following scenario assumes that the follower robot observes the rear side of the leader robot.
 
-Pattern decoding result:
+Current back-face setup:
 
 ```text
-Expected pattern: 11001100
-Decoded pattern: 11001100110011001100...
-Match score: 1.0
-Result: BACK pattern detected successfully
+Active face: back only
+LED color: green
+Pattern: 11001100
+FPS: 60
+Bit duration: 0.1 s
+Frames per bit: 6
 ```
 
-Distance analysis result after filtering reliable frames:
+The two back LEDs blink with the same pattern and the same phase.
+
+---
+
+## Current Pipeline
+
+The current processing pipeline consists of the following stages:
 
 ```text
-Valid condition:
-bit == 1
-pair_found == 1
-candidate_count == 2
-pixel_distance is not null
-
-Filtered median pixel distance: approximately 168 px
-Filtered standard deviation: approximately 0.61 px
+PNG frame sequence
+        ↓
+LED candidate extraction
+        ↓
+Back LED pair detection
+        ↓
+Frame-level ON/OFF bit extraction
+        ↓
+Pattern decoding and global pattern accuracy
+        ↓
+Pixel-distance based range estimation
+        ↓
+Midpoint / image error / camera ray calculation
+        ↓
+Controller-ready JSON observation packet
 ```
 
-This confirms that the back LED pair can be detected, the pattern can be decoded, and the pixel distance between the two LEDs can be measured reliably in a controlled static setup.
+---
 
 ## Repository Structure
 
@@ -85,7 +100,9 @@ This confirms that the back LED pair can be detected, the pattern can be decoded
 │   ├── 03_hsv_tuner.py
 │   ├── 04_back_pair_distance_extract.py
 │   ├── 05_back_pattern_decode.py
-│   └── 06_back_distance_analysis.py
+│   ├── 06_back_distance_analysis.py
+│   ├── 07_distance_model.py
+│   ├── 08_generate_observation_packet.py
 │   └── legacy/
 │       ├── 02_led_detection_test.py
 │       ├── 04_extract_led_on_off.py
@@ -93,6 +110,7 @@ This confirms that the back LED pair can be detected, the pattern can be decoded
 │
 ├── docs/
 │   ├── progress_log.md
+│   ├── calibration_log.md
 │   ├── dataset_notes.md
 │   └── next_steps.md
 │
@@ -103,25 +121,58 @@ This confirms that the back LED pair can be detected, the pattern can be decoded
     └── .gitkeep
 ```
 
+---
+
 ## Dataset Policy
 
 PNG frame sequences are not stored directly in this repository because they are large.
 
 Datasets should be stored externally, for example in Google Drive or OneDrive, as ZIP files. The folder structure should be preserved.
 
-Example dataset structure:
+Local dataset folders should be placed under:
 
 ```text
-Unity_LED_Dataset/
+datasets/
+```
+
+Example:
+
+```text
+datasets/
 ├── BackOnly_Test_01/
-├── BackOnly_1m/
-├── BackOnly_2m/
-├── BackOnly_3m/
-├── BackOnly_4m/
-└── BackOnly_5m/
+├── BackOnly_Test_02/
+├── BackOnly_Test_03/
+├── BackOnly_Test_04/
+├── BackOnly_Test_05/
+└── BackOnly_Test_06/
 ```
 
 Each dataset folder should contain the PNG frame sequence generated by Unity Recorder.
+
+Generated CSV and JSON outputs are written under:
+
+```text
+outputs/
+```
+
+Example:
+
+```text
+outputs/
+├── BackOnly_Test_04/
+│   ├── back_pair_results.csv
+│   ├── back_pair_distance_filtered.csv
+│   ├── back_pattern_decode_summary.json
+│   └── observation_packet_frame_120.json
+│
+└── calibration/
+    ├── distance_model_summary.json
+    └── distance_model_evaluation.csv
+```
+
+The `datasets/` and `outputs/` folders are ignored by Git except for `.gitkeep`.
+
+---
 
 ## Installation
 
@@ -138,69 +189,260 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+---
+
 ## Running the Current Back-Only Pipeline
 
-1. Preview the PNG sequence:
+### 1. Preview the PNG sequence
 
 ```powershell
-python scripts/01_preview_png_sequence.py
+python .\scripts\01_preview_png_sequence.py
 ```
 
-2. Extract back LED pair distance and frame-level bit sequence:
+### 2. Tune HSV values
 
 ```powershell
-python scripts/04_back_pair_distance_extract.py
+python .\scripts\03_hsv_tuner.py
 ```
 
-3. Decode the back LED pattern:
+### 3. Extract back LED pair data
 
 ```powershell
-python scripts/05_back_pattern_decode.py
+python .\scripts\04_back_pair_distance_extract.py
 ```
 
-4. Analyze filtered pixel distance:
-
-```powershell
-python scripts/06_back_distance_analysis.py
-```
-
-## Current Design Decision
-
-For the first controlled stage, the system uses:
+This script reads PNG frames from:
 
 ```text
-Back face:
-Pattern: 11001100
-Color: green
-Frames per bit: 6
+datasets/<DATASET_NAME>/
 ```
 
-The two LEDs on the same face must blink with the same pattern and the same phase.
+and writes:
 
-This is important because distance estimation depends on detecting both LEDs of the same face at the same time.
+```text
+outputs/<DATASET_NAME>/back_pair_results.csv
+```
+
+The generated CSV includes:
+
+* frame index,
+* LED candidate count,
+* ON/OFF bit value,
+* pair_found flag,
+* LED center coordinates,
+* pixel distance,
+* LED pair midpoint,
+* normalized image-center error,
+* camera ray direction,
+* image width and height.
+
+### 4. Decode the back LED pattern
+
+```powershell
+python .\scripts\05_back_pattern_decode.py BackOnly_Test_04
+```
+
+The decoder reports:
+
+* local 8-bit best pattern score,
+* global repeated-pattern accuracy,
+* bit error count,
+* bit error rate,
+* best global shift.
+
+This is important because a local score of `1.0` only proves that the expected pattern exists somewhere in the decoded sequence. The global accuracy shows whether the entire decoded sequence is reliable.
+
+### 5. Analyze filtered LED pair distance
+
+```powershell
+python .\scripts\06_back_distance_analysis.py
+```
+
+The current reliable-frame condition is:
+
+```text
+bit == 1
+pair_found == 1
+candidate_count == 2
+pixel_distance is not null
+```
+
+This avoids using frames where false positives or split LED blobs create unreliable pair measurements.
+
+### 6. Fit the distance model
+
+```powershell
+python .\scripts\07_distance_model.py
+```
+
+The current fitted model is:
+
+```text
+estimated_distance = 168.628584 / pixel_distance + 0.609526
+```
+
+Current model performance:
+
+```text
+Mean absolute error: 0.116 unit
+RMSE: 0.131 unit
+```
+
+This model is intended as a first controller-side distance cue, not as a final metric localization system.
+
+### 7. Generate a controller-ready observation packet
+
+```powershell
+python .\scripts\08_generate_observation_packet.py BackOnly_Test_04
+```
+
+This generates a JSON packet from the first valid observation.
+
+A specific frame can also be requested:
+
+```powershell
+python .\scripts\08_generate_observation_packet.py BackOnly_Test_04 120
+```
+
+If the requested frame is not valid, the nearest valid observation is selected.
+
+Example packet:
+
+```json
+{
+    "dataset": "BackOnly_Test_04",
+    "requested_frame": 120,
+    "selected_frame_delta": 0,
+    "frame": 120,
+    "valid": true,
+    "face_id": "BACK",
+    "pattern": "11001100",
+    "pattern_accuracy": 1.0,
+    "bit_error_count": 0,
+    "bit_error_rate": 0.0,
+    "pair_found": true,
+    "candidate_count": 2,
+    "led1_px": [853.0, 555.0],
+    "led2_px": [927.0, 556.0],
+    "midpoint_px": [890.0, 555.5],
+    "error_norm": [-0.0729, -0.0287],
+    "ray_cam": [-0.0746, -0.0165, 0.9971],
+    "pixel_distance": 74.0068,
+    "estimated_distance": 2.8881,
+    "distance_confidence": 1.0,
+    "image_size": [1920, 1080]
+}
+```
+
+---
+
+## Calibration Results
+
+Current back-only calibration results:
+
+| Test name        | Approx. distance | Pattern accuracy | Median pixel distance | Distance std | Notes                 |
+| ---------------- | ---------------: | ---------------: | --------------------: | -----------: | --------------------- |
+| BackOnly_Test_01 |             1.47 |             1.00 |                168 px |      0.61 px | Initial reference     |
+| BackOnly_Test_02 |             2.00 |             1.00 |                118 px |     0.002 px | Stable                |
+| BackOnly_Test_03 |             2.50 |             1.00 |                 92 px |      0.74 px | Usable                |
+| BackOnly_Test_04 |             3.00 |             1.00 |              73.06 px |      0.82 px | Clean fixed-axis test |
+| BackOnly_Test_05 |             4.00 |             1.00 |                 53 px |      0.67 px | Clean fixed-axis test |
+| BackOnly_Test_06 |             5.00 |             0.99 |                 37 px |      2.24 px | Far-range boundary    |
+
+The results show the expected inverse relationship:
+
+```text
+larger camera-target distance → smaller LED pixel distance
+```
+
+At around 5 Unity units, the LED pattern is still detectable, but the pixel-distance measurement becomes noisier because the LED pair appears much smaller in the image.
+
+---
+
+## Current Design Decisions
+
+### 1. Same-face LEDs use the same pattern and phase
+
+The two LEDs on the same face blink with the same binary pattern and the same phase.
+
+This allows the vision system to:
+
+* verify that two detected blobs belong to the same face,
+* compute a stable midpoint,
+* estimate distance from pixel spacing.
+
+### 2. Color is not the primary decision factor
+
+HSV color filtering is used for candidate extraction only.
+
+The final decision should rely more on:
+
+* pattern consistency,
+* two-LED geometry,
+* temporal stability,
+* confidence score.
+
+### 3. Distance is reliable mainly for near-frontal face views
+
+Pixel-distance based range estimation is most reliable when the observed face is approximately frontal.
+
+In diagonal or multi-face views, distance confidence should be reduced and the controller should rely more on midpoint, ray, face ID, and confidence values.
+
+### 4. Multi-face views should produce per-face observations
+
+For diagonal views where multiple faces are visible, the system should not average all visible LEDs into one global point.
+
+Instead, it should generate one observation per visible face:
+
+```text
+BACK observation
+RIGHT observation
+LEFT observation
+FRONT observation
+```
+
+Then a primary face and optional secondary face can be selected based on confidence.
+
+---
+
+## Controller-Side Observation Fields
+
+The current JSON observation packet is designed as a debugging-friendly prototype for the Linux-side controller.
+
+Important fields:
+
+| Field                 | Meaning                                             |
+| --------------------- | --------------------------------------------------- |
+| `valid`               | Whether this observation should be used             |
+| `face_id`             | Detected face, currently `BACK`                     |
+| `pattern_accuracy`    | Global repeated-pattern reliability                 |
+| `bit_error_rate`      | Fraction of decoded bits that are wrong             |
+| `midpoint_px`         | Pixel midpoint of the detected LED pair             |
+| `error_norm`          | Normalized image-center error                       |
+| `ray_cam`             | Camera-frame ray toward the LED pair midpoint       |
+| `pixel_distance`      | Raw pixel spacing between the two LEDs              |
+| `estimated_distance`  | Distance estimate from the fitted calibration model |
+| `distance_confidence` | Heuristic confidence for the distance estimate      |
+
+For the first controller prototype:
+
+```text
+error_norm[0] → horizontal/yaw correction
+error_norm[1] → vertical/depth or pitch correction
+estimated_distance → forward/backward distance control
+valid + confidence fields → controller gating
+```
+
+---
 
 ## Next Steps
 
-1. Repeat the back-only test at different known distances.
-2. Create datasets such as:
-
-   * `BackOnly_1m`
-   * `BackOnly_2m`
-   * `BackOnly_3m`
-   * `BackOnly_4m`
-   * `BackOnly_5m`
-3. Extract the median pixel distance for each known distance.
-4. Build a calibration table:
-
-```text
-Real distance | Median pixel distance | Pattern score | Std
-```
-
-5. Fit a simple relationship:
-
-```text
-distance ≈ K / pixel_distance
-```
-
-6. Extend the pipeline to other faces.
-7. Add candidate tracking and stronger false-positive rejection.
+1. Use the JSON observation packet as the first debugging payload.
+2. Implement UDP transmission from the Windows/OpenCV side.
+3. Implement a simple UDP receiver on the Linux/control side.
+4. First test UDP locally, then Windows → Linux.
+5. Later convert JSON to a compact binary packet if latency or bandwidth becomes a problem.
+6. Extend the pipeline from back-only tracking to multi-face detection.
+7. Add stronger candidate-pair selection when `candidate_count > 2`.
+8. Add temporal tracking for LED candidates.
+9. Generate per-face observations for diagonal/multi-face views.
