@@ -1107,3 +1107,115 @@ Unity or Unreal live render
 → Gazebo/ArduSub follower motion
 
 This will be the first real step toward closed-loop tracking.
+
+
+Progress Update — Clean Constant-ON Video and Controller V2 Validation
+Summary
+
+A new clean dynamic Unity video was recorded using the BACK LEDs in constant-ON mode:
+
+BackOnly_Dynamic_Clean_01_CONSTANT_ON.mp4
+
+The purpose of this dataset was to separate pure tracking/control behavior from blink-pattern related target loss. Unlike the previous blink-pattern video, the BACK LEDs were kept continuously visible so that midpoint tracking, distance estimation, and controller smoothing could be evaluated more clearly.
+
+A new Unity LED mode was added to RovLeds.cs:
+
+forceBackConstantOn = true
+
+When this mode is enabled:
+
+frontLEDs → OFF
+backLEDs  → constant ON
+leftLEDs  → OFF
+rightLEDs → OFF
+
+This allows clean BACK-only tracking tests without binary blink interruption.
+
+Video Dataset
+
+Recorded video:
+
+datasets/videos/BackOnly_Dynamic_Clean_01_CONSTANT_ON.mp4
+
+Video properties:
+
+Resolution : 1920x1080
+FPS        : 60.0
+Frames     : 1201
+Duration   : 20.0167 s
+
+Approximate movement sequence:
+
+1. Initial centered position
+2. Movement to the right in the image
+3. Movement to the left in the image
+4. Forward and backward movement while on the left side
+5. Yaw right / yaw left motion
+6. Final recentering near the image center
+OpenCV Sender V2 Analysis
+
+The video was processed using:
+
+scripts/13_live_back_video_sender_v2.py
+
+with:
+
+allow_more_than_two_candidates = true
+pair_strategy = best
+detection_rate = every video frame
+send_rate = 20 Hz
+
+The generated observation log was analyzed using:
+
+scripts/14_analyze_video_observation_log.py
+
+Main results:
+
+total packets : 401
+valid_count   : 342
+invalid_count : 59
+held_count    : 56
+
+valid_ratio   : 0.853
+invalid_ratio : 0.147
+held_ratio    : 0.140
+
+This satisfies the clean-video target:
+
+valid_ratio   ≥ 0.85
+invalid_ratio ≤ 0.15
+
+The video also contains both horizontal error signs and crosses the desired distance:
+
+error_x range              : -0.7885 to +0.5979
+estimated_distance range   : 2.1356 to 5.4275
+desired controller distance: 3.0
+
+Therefore, this video is suitable for controller-side testing because it can produce both yaw directions and both forward/backward distance-control behavior.
+
+Debug Overlay V2
+
+A new V2-compatible debug overlay script was added:
+
+scripts/15_render_video_detection_debug_v2.py
+
+This script reuses the same pair-selection logic as 13_live_back_video_sender_v2.py, so the green selected LED pair shown in the overlay matches the pair used by the UDP sender.
+
+Generated overlay:
+
+outputs/BackOnly_Dynamic_Clean_01_CONSTANT_ON_v2/debug_overlay_v2.mp4
+
+Visual inspection results:
+
+- The selected green pair corresponds to the correct BACK LED pair.
+- When extra orange candidates appear, the V2 best-pair logic usually keeps the correct pair.
+- At far-left / far-distance regions, detection can temporarily break.
+- The midpoint line is visually consistent with the detected LED pair.
+- The sign of error_x is correct:
+  target right in image → error_x positive
+  target left in image  → error_x negative
+- Final frames show the target moving back toward the image center.
+
+Known issue:
+
+Even in constant-ON mode, some frames are classified as BIT_OFF or PAIR_NOT_FOUND. This does not mean the LEDs physically turned off; it means the HSV mask failed to extract enough valid LED area in those frames. This mostly happens when the robot is far away, near the edge of the image, or during difficult yaw/angle conditions.
