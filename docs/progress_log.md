@@ -1219,3 +1219,182 @@ Visual inspection results:
 Known issue:
 
 Even in constant-ON mode, some frames are classified as BIT_OFF or PAIR_NOT_FOUND. This does not mean the LEDs physically turned off; it means the HSV mask failed to extract enough valid LED area in those frames. This mostly happens when the robot is far away, near the edge of the image, or during difficult yaw/angle conditions.
+
+
+## Progress Update — Unity Camera Pose Bridge Initial Validation
+
+The Unity `CV_Test_Camera` was connected to a separate UDP pose receiver using port `5008`, while the leader robot kept its own receiver on port `5007`. This separation prevents port conflicts between the manually controlled leader object and the camera/follower visual pose.
+
+The `GazeboDataReceiver` component was added to `CV_Test_Camera` with the following working test configuration:
+
+```text
+Listen Port              = 5008
+Position Scale           = 1
+Force Unity Start Pose   = false
+Use Local Transform      = true
+Keyboard Relative Mode   = true
+
+Interpolation Delay      = 0.025
+Max Buffer Samples       = 120
+
+Use Smoothing            = true
+Position Smooth Time     = 0.045
+Rotation Smooth Speed    = 12
+Position Deadband        = 0.0015
+Rotation Deadband Deg    = 0.05
+```
+
+A Linux-to-Windows UDP test confirmed that Unity receives 9-float pose packets on port `5008` and that `CV_Test_Camera` can be moved through the receiver.
+
+The current Linux pose bridge test uses:
+
+```bash
+--rate 90
+--scale 0.40
+--yaw-only
+```
+
+Initial observation:
+
+```text
+- UDP 5008 communication works.
+- CV_Test_Camera moves from external pose packets.
+- Yaw direction appears to be correctly matched between Gazebo and Unity.
+- Position axes are not yet fully aligned.
+```
+
+Important note:
+
+The next required calibration step is to fix the translation-axis mapping between Gazebo/MAVLink `LOCAL_POSITION_NED` and Unity camera motion. Yaw mapping should be preserved for now because the observed yaw direction is currently correct.
+
+
+
+## Live Unity Capture and Yaw-Aware Detection Tests
+
+A live Unity Game View capture pipeline was tested using `16_live_unity_window_sender.py`.
+
+The selected capture region for the current 2K monitor setup is:
+
+```text
+--region-left 318
+--region-top 206
+--region-width 1922
+--region-height 1082
+```
+
+This region captures the Unity Game View / camera image while excluding most editor UI elements.
+
+## Confirmed Live Capture Pipeline
+
+The following chain was validated:
+
+```text
+Unity Game View
+→ screen capture with mss
+→ OpenCV LED candidate detection
+→ BACK LED pair selection
+→ observation packet generation
+→ optional UDP output to Linux controller
+```
+
+The live sender can be used in two modes:
+
+```text
+1. Preview / log-only mode:
+   Used for visual debugging without sending UDP packets.
+
+2. UDP sender mode:
+   Used for closed-loop controller testing.
+```
+
+## Important Detection Parameter Decision
+
+The default distance confidence threshold was too strict for live yaw tests.
+
+During yaw motion, the projected LED pixel distance can drop below approximately 35 px because of perspective / foreshortening. With the previous confidence model, this caused many frames to become `LOW_CONFIDENCE`.
+
+The selected live yaw detection setting is:
+
+```text
+--min-distance-confidence 0.40
+```
+
+This setting must also match the controller-side threshold:
+
+```text
+controller --min-distance-confidence 0.40
+```
+
+Otherwise, the sender may mark packets as valid while the controller rejects them as `LOW_DISTANCE_CONFIDENCE`.
+
+## Rejected / Not Selected Setting
+
+The following setting was tested:
+
+```text
+--on-area-threshold 20
+```
+
+It did not become the selected baseline. Lowering the area threshold can admit extra weak/noisy candidates and may increase pair instability. The current preferred behavior is to keep the default area threshold and only use:
+
+```text
+--min-distance-confidence 0.40
+```
+
+## BIT_OFF Interpretation
+
+In the current constant-ON LED test mode, `BIT_OFF` should not be interpreted as “the LED pattern is intentionally off.”
+
+For these live constant-ON tests, `BIT_OFF` usually means:
+
+```text
+- total detected LED candidate area is below the threshold, or
+- no usable LED blob was detected in that frame, or
+- the target moved close to/outside the camera field of view.
+```
+
+Therefore, `BIT_OFF` is currently a detection-loss reason, not a real blink-pattern state.
+
+## Moving Yaw Debug Findings
+
+Large yaw commands caused the target to move near the edge of the camera image or outside the field of view.
+
+Observed behavior:
+
+```text
+r=80, duration=3.0 s:
+  Too aggressive. Target left the field of view.
+
+r=20, duration=1.0 s:
+  Still too large. Target moved close to the image edge.
+
+r=8, duration=0.5 s:
+  Target stayed inside the image.
+  BACK LED pair remained mostly detectable.
+```
+
+Conclusion:
+
+```text
+The OpenCV detection is mostly stable if the target stays inside the camera view.
+The major detection failures during earlier closed-loop tests were caused by overly large yaw motion pushing the target toward/outside the field of view.
+```
+
+## Current Vision-Side Baseline
+
+For live closed-loop yaw tests, use:
+
+```text
+--allow-more-than-two-candidates
+--pair-strategy best
+--min-distance-confidence 0.40
+```
+
+Keep the current crop region unless the Unity Game View layout changes.
+
+## Remaining Vision-Side Notes
+
+1. During yaw, the estimated distance can become artificially large because the BACK LED pair is viewed at an angle and the projected pixel distance becomes smaller.
+2. This is a foreshortening effect, not necessarily real forward/backward motion.
+3. Forward control should therefore be added carefully with yaw gating.
+4. Future work may include angle-aware distance correction or using distance only when the target is near-frontal.
