@@ -1,5 +1,10 @@
 # Next Steps
 
+> **Note:** This document reflects an earlier development-planning stage.
+> Several items listed below — including live Unity capture and subsequent perception integration — have since been implemented.
+> See the main README and `progress_log.md` for the current project status.
+
+
 ## Current Status
 
 The project has passed the offline video-based vision-to-control integration stage.
