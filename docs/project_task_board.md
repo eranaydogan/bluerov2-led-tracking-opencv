@@ -650,3 +650,227 @@ güncellenmeli.
 3. Unity/Gazebo/ArduSub kontrol döngüsüne tam entegrasyon yap.
 4. Bitirme raporu için deney tabloları ve görselleri üret.
 5. Final demo senaryosunu oluştur.
+
+
+
+
+
+30.05.26 update
+
+
+
+# Project Task Board — BlueROV2 LED-Based Tracking and Control Pipeline
+
+## 0. Genel Durum
+
+Bu doküman, BlueROV2 LED tabanlı hedef takip sistemi için yapılan işleri ve sonraki geliştirme adımlarını takip etmek amacıyla hazırlanmıştır.
+
+Güncel sistem seviyesi:
+
+```text
+Unity recorded video
+→ OpenCV video detection
+→ UDP observation packet
+→ Linux controller
+→ MAVLink MANUAL_CONTROL
+→ ArduSub/Gazebo motion
+→ STOP/DISARM safety
+
+Bu aşama offline video tabanlı entegrasyon testidir. Gerçek canlı kapalı çevrim henüz tamamlanmamıştır.
+
+1. Done
+1.1 OpenCV / Vision
+
+Unity PNG sequence okuma
+
+HSV tabanlı LED aday çıkarımı
+
+Back-only LED pair detection
+
+Back pattern decode: 11001100
+
+Global repeated-pattern accuracy hesabı
+
+Distance analysis
+
+Distance model fitting
+
+Current distance model:
+
+estimated_distance = 168.628584 / pixel_distance + 0.609526
+
+LED pair midpoint calculation
+
+Normalized image error calculation
+
+Camera ray calculation
+
+Controller-ready JSON observation packet generation
+
+1.2 UDP / Communication
+
+Localhost UDP send/receive test
+
+Windows-to-Linux UDP observation streaming
+
+CSV replay UDP sender
+
+Script:
+
+scripts/11_replay_back_observation_from_csv.py
+
+PNG sequence OpenCV UDP sender
+
+Script:
+
+scripts/12_live_back_png_sequence_sender.py
+
+MP4 video OpenCV UDP sender
+
+Script:
+
+scripts/13_live_back_video_sender.py
+1.3 Unity / Dataset Generation
+
+Frame-based LED timing
+
+Back-only test mode
+
+Unity GazeboDataReceiver keyboard-relative mode
+
+Python keyboard pose sender
+
+Unity Movie Recorder setup
+
+Dynamic BACK video recording
+
+Dataset:
+
+BackOnly_Dynamic_Test_01.mp4
+
+Properties:
+
+1201 frames
+60 FPS
+20.0167 seconds
+1920x1080
+1.4 Linux Control Integration
+
+MAVLink heartbeat connection
+
+MANUAL mode request
+
+ARM/DISARM test
+
+MANUAL_CONTROL axis mapping
+
+Safe UDP-to-MAVLink controller
+
+Script:
+
+05_udp_to_mavlink_controller_safe.py
+
+Arms-off CSV replay test
+
+Armed CSV replay test
+
+Arms-off PNG sequence test
+
+Armed PNG sequence test
+
+Arms-off video sender test
+
+Armed video sender test with reduced gains
+
+Safe armed-test parameters:
+
+k_forward = 100
+k_yaw = 120
+max_x = 120
+max_r = 120
+runtime = 10 s
+2. In Progress
+
+Improve video detection stability
+
+Analyze video_observation_log.csv
+
+Render debug overlay video
+
+Improve candidate pair selection when candidate_count > 2
+
+Improve held_observation logic
+
+Add command smoothing and deadband to Linux controller
+
+Prepare live Unity/Unreal render capture
+
+3. Next
+3.1 Vision-side next tasks
+
+Create scripts/14_analyze_video_observation_log.py
+
+Create scripts/15_render_video_detection_debug.py
+
+Add pair scoring for candidate selection
+
+Add reason-based hold duration
+
+Add temporal continuity checks
+
+Tune HSV thresholds for MP4 and live-render cases
+
+3.2 Control-side next tasks
+
+Create 06_live_udp_to_mavlink_controller.py
+
+Add yaw deadband
+
+Add forward deadband
+
+Add command EMA smoothing
+
+Add acceleration limiting
+
+Add confidence-based gain scaling
+
+Add explicit state machine:
+
+TRACK
+ALIGN_ONLY
+INVALID
+PACKET_TIMEOUT
+STOP
+SEARCH
+3.3 Simulation-side next tasks
+
+Test cleaner Unity video without fish occlusion
+
+Record dynamic videos at different distances
+
+Record videos with controlled lateral motion
+
+Record videos with controlled yaw motion
+
+Add live Unity window/render capture
+
+Repeat the same process in Unreal Engine
+
+3.4 Long-term tasks
+
+Move from offline video to live render capture
+
+Build true closed-loop tracking
+
+Extend from BACK-only to multi-face tracking
+
+Add FRONT / LEFT / RIGHT face patterns
+
+Add primary/secondary face selection
+
+Add search/lost-target behavior
+
+Evaluate JSON vs compact binary UDP packet
+
+
+---

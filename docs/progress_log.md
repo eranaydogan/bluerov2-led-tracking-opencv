@@ -567,3 +567,834 @@ The localhost latency was approximately below 1 ms.
 ### Conclusion
 
 The local UDP transmission test was successful. The JSON-based observation packet is now ready for Windows-to-Linux network testing before being connected to the actual controller.
+
+Docs Update Patch — 2026-05-30
+# Progress Report — Live UDP Observation Senders and Video-Based Control Integration
+
+## 1. Current Stage
+
+The project has moved from offline observation-packet generation to live-like UDP observation streaming and control-side MAVLink integration.
+
+Previously, the OpenCV side could generate a single controller-ready JSON packet from processed CSV data. In the latest development stage, this was extended in three steps:
+
+1. CSV replay UDP sender,
+2. PNG sequence OpenCV UDP sender,
+3. MP4 video OpenCV UDP sender.
+
+The Linux-side controller was also tested with these observation streams using MAVLink `MANUAL_CONTROL`. Both arms-off and armed tests were completed successfully.
+
+This stage validates the following full integration chain:
+
+```text
+Unity recorded video
+→ OpenCV frame processing
+→ UDP observation packet
+→ Linux controller
+→ MAVLink MANUAL_CONTROL
+→ ArduSub/Gazebo BlueROV2 motion
+→ STOP
+→ DISARM
+
+This is still not a true live closed-loop tracking test because the video is pre-recorded. However, it is a major integration milestone because image-derived observations are now driving the simulated vehicle through the control pipeline.
+
+2. Added Scripts
+2.1 CSV Replay UDP Sender
+
+Script:
+
+scripts/11_replay_back_observation_from_csv.py
+
+Purpose:
+
+read outputs/<DATASET_NAME>/back_pair_results.csv,
+read pattern summary JSON,
+read distance model summary JSON,
+reconstruct controller-ready BACK observation packets,
+send packets over UDP to the Linux controller.
+
+Example command:
+
+python .\scripts\11_replay_back_observation_from_csv.py `
+  --dataset BackOnly_Test_04 `
+  --ip 192.168.137.228 `
+  --port 5005 `
+  --rate 20 `
+  --loop
+
+Result:
+
+Windows-to-Linux UDP observation stream was verified.
+Linux controller stayed in TRACK when valid packets arrived.
+Packet age stayed low.
+No packet timeout occurred during normal streaming.
+The controller generated changing commands from frame-sequence data.
+2.2 PNG Sequence OpenCV UDP Sender
+
+Script:
+
+scripts/12_live_back_png_sequence_sender.py
+
+Purpose:
+
+read PNG frames directly from datasets/<DATASET_NAME>/,
+detect the BACK LED pair using OpenCV,
+apply HSV thresholding and contour filtering,
+compute:
+LED pair midpoint,
+normalized image error,
+camera ray,
+LED pixel distance,
+estimated distance,
+distance confidence,
+send one observation packet per processed frame over UDP.
+
+Example command:
+
+python .\scripts\12_live_back_png_sequence_sender.py `
+  --dataset BackOnly_Test_04 `
+  --ip 192.168.137.228 `
+  --port 5005 `
+  --rate 20 `
+  --loop
+
+Main parameters:
+
+LOWER_BACK = [54, 83, 172]
+UPPER_BACK = [95, 147, 226]
+
+min_area = 20
+max_area = 6000
+
+min_aspect_ratio = 0.25
+max_aspect_ratio = 4.50
+
+on_area_threshold = 35
+camera_vertical_fov_deg = 60
+
+Important addition:
+
+held_observation
+
+This field is used when the LED pair is temporarily missing due to blink OFF frames or short detection gaps. Instead of immediately dropping to invalid, the sender can briefly reuse the last valid observation.
+
+Result:
+
+PNG frames are processed directly by OpenCV.
+CSV dependency was removed for this stage.
+UDP observation packets are generated from image data.
+Linux controller successfully received and used the stream.
+Both arms-off and armed tests were completed successfully with 05_udp_to_mavlink_controller_safe.py.
+2.3 Video-Based BACK Observation Sender
+
+Script:
+
+scripts/13_live_back_video_sender.py
+
+Purpose:
+
+read an MP4 video using OpenCV,
+process the video frame by frame,
+downsample a 60 FPS video to a 20 Hz observation stream,
+detect BACK LED candidates,
+generate UDP observation packets,
+save a CSV log for later analysis.
+
+Input video:
+
+datasets/videos/BackOnly_Dynamic_Test_01.mp4
+
+Example command:
+
+python .\scripts\13_live_back_video_sender.py `
+  --video .\datasets\videos\BackOnly_Dynamic_Test_01.mp4 `
+  --dataset BackOnly_Dynamic_Test_01 `
+  --ip 192.168.137.228 `
+  --port 5005 `
+  --rate 20 `
+  --loop
+
+Video properties:
+
+Frame count: 1201
+FPS: 60.0
+Duration: 20.0167 s
+
+Since the output stream rate was 20 Hz, the sender used:
+
+frame_step = 3
+
+The script produced:
+
+outputs/BackOnly_Dynamic_Test_01/video_observation_log.csv
+
+Observed states included:
+
+valid=True
+held_observation=True
+BIT_OFF
+LOW_CONFIDENCE
+CANDIDATE_COUNT_NOT_2
+PAIR_NOT_FOUND
+
+This confirms that the video sender can handle both valid detections and temporary invalid/occluded frames.
+
+3. Unity Recording Pipeline Updates
+
+Unity was used to record a dynamic leader-robot video for offline video-based integration testing.
+
+3.1 GazeboDataReceiver Update
+
+The Unity GazeboDataReceiver script was updated to support two modes:
+
+1. Absolute Gazebo pose mode
+2. Keyboard relative recording mode
+
+For dataset recording, the new mode was used:
+
+keyboardRelativeMode = true
+
+In this mode, the Python keyboard sender transmits relative x, y, z, yaw offsets. The receiver no longer subtracts pythonOrigin from the incoming packet. This prevents the leader object from jumping to an unintended position when the keyboard sender starts.
+
+Important Unity receiver settings:
+
+Force Unity Start Pose = true
+Use Local Transform = true
+Keyboard Relative Mode = true
+
+Forced Unity Start Position:
+X = -124.123
+Y = -125.322
+Z = 940.1
+3.2 Keyboard Pose Sender
+
+A Python keyboard sender was used to move the leader robot during video recording.
+
+Controls:
+
+W/S → forward/back
+A/D → left/right
+R/F → up/down
+Q/E → yaw left/right
+Shift → faster
+X → reset
+ESC → quit
+
+The sender transmits a 9-float binary UDP packet to Unity:
+
+x
+y
+z
+roll
+pitch
+yaw
+timestamp
+seq
+senderDt
+
+Unity listens on:
+
+127.0.0.1:5007
+3.3 Unity Recorder Settings
+
+The dynamic video was recorded using Unity Recorder.
+
+Settings:
+
+Recorder Type: Movie
+Source: Targeted Camera
+Camera: TaggedCamera
+Tag: CVRecorderCamera
+Resolution: 1920x1080
+Playback: Constant
+Target FPS: 60
+Cap FPS: enabled
+Codec: H.264 MP4
+Encoding Quality: High
+Include Audio: disabled
+Accumulation / Motion Blur: disabled
+
+Output:
+
+datasets/videos/BackOnly_Dynamic_Test_01.mp4
+
+The video contains:
+
+right movement,
+left movement,
+forward movement,
+temporary occlusion by fish,
+return movement,
+yaw right/left test,
+final stop without reset.
+4. Linux Control Integration
+
+The Linux control side uses:
+
+scripts/05_udp_to_mavlink_controller_safe.py
+
+This script:
+
+connects to MAVLink at udpin:127.0.0.1:14551,
+listens for UDP observation packets at 0.0.0.0:5005,
+parses JSON observation packets,
+checks validity and confidence,
+computes x and r commands,
+sends MANUAL_CONTROL to ArduSub,
+sends STOP on invalid observation or timeout,
+sends STOP and DISARM at the end of the test.
+
+Initial control mapping:
+
+x = k_forward * (estimated_distance - desired_distance)
+r = k_yaw * error_norm[0]
+z = 500
+y = 0
+
+Current desired distance:
+
+desired_distance = 3.0
+
+Vertical control is currently disabled:
+
+z = 500 fixed
+5. Video-Based Arms-Off Test
+
+First, the video sender was tested with the Linux controller without arming the vehicle.
+
+Command:
+
+python scripts/05_udp_to_mavlink_controller_safe.py \
+  --runtime 30 \
+  --packet-timeout 1.0 \
+  --k-forward 100 \
+  --k-yaw 120 \
+  --max-x 120 \
+  --max-r 120
+
+Result:
+
+UDP packets were received.
+state=TRACK appeared when valid BACK observations arrived.
+state=INVALID appeared when detection was not valid.
+valid=True packets generated control commands.
+valid=False packets generated STOP commands:
+cmd=(0,0,500,0)
+
+Example observations:
+
+error_x > 0 → r > 0
+error_x < 0 → r < 0
+estimated_distance > 3.0 → x > 0
+
+The reduced gains prevented overly aggressive commands.
+
+6. Video-Based Armed Test
+
+After the arms-off test, a short armed test was performed.
+
+Linux command:
+
+python scripts/05_udp_to_mavlink_controller_safe.py \
+  --runtime 10 \
+  --packet-timeout 1.0 \
+  --arm \
+  --k-forward 100 \
+  --k-yaw 120 \
+  --max-x 120 \
+  --max-r 120
+
+Windows video sender:
+
+python .\scripts\13_live_back_video_sender.py `
+  --video .\datasets\videos\BackOnly_Dynamic_Test_01.mp4 `
+  --dataset BackOnly_Dynamic_Test_01 `
+  --ip 192.168.137.228 `
+  --port 5005 `
+  --rate 20 `
+  --loop
+
+Observed result:
+
+Vehicle is ARMED
+state=TRACK
+HB armed=True
+valid=True → command generated
+valid=False → STOP command generated
+Sending STOP before exit
+Vehicle is DISARMED
+Controller finished safely
+
+This confirms that the video-based OpenCV observation stream can drive the ArduSub/Gazebo vehicle through MAVLink in an armed test, while still exiting safely.
+
+7. Current Technical Status
+
+The system has now been validated up to:
+
+Unity recorded video
+→ OpenCV video detection
+→ UDP observation stream
+→ Linux controller
+→ MAVLink MANUAL_CONTROL
+→ ArduSub/Gazebo motion
+→ STOP/DISARM safety
+
+Completed:
+
+static observation packet generation,
+localhost UDP packet test,
+Windows-to-Linux UDP observation transmission,
+CSV replay sender,
+PNG sequence OpenCV sender,
+MP4 video OpenCV sender,
+Linux UDP-to-MAVLink safe controller test,
+arms-off video integration test,
+armed video integration test with reduced gains.
+
+Important limitation:
+
+This is still an offline video-based test. It is not yet a true live closed-loop tracking test because the video image does not change in response to the follower robot’s motion.
+
+8. Known Limitations
+8.1 Frequent INVALID states
+
+The dynamic video test produced several invalid conditions:
+
+BIT_OFF
+LOW_CONFIDENCE
+CANDIDATE_COUNT_NOT_2
+PAIR_NOT_FOUND
+
+This creates a safe but discontinuous behavior:
+
+TRACK → STOP → TRACK → STOP
+
+This is acceptable for safety, but it should be improved for smoother tracking.
+
+8.2 Candidate selection is still simple
+
+Current logic often expects:
+
+candidate_count == 2
+
+This is safe in controlled tests but can fail in video when:
+
+reflections appear,
+LED blobs split,
+fish or other objects occlude the LEDs,
+more than two green candidates appear.
+
+Future solution:
+
+evaluate all possible candidate pairs,
+score by geometry,
+score by area similarity,
+score by previous valid distance,
+score by temporal consistency.
+8.3 MP4 compression can affect HSV values
+
+MP4/H.264 compression can slightly change colors and edges.
+
+For strict algorithm calibration, PNG sequences are still preferred. MP4 is useful for integration/stress tests and demonstration, especially when testing video processing and temporary occlusions.
+
+8.4 Distance model may need refinement for dynamic videos
+
+The current distance model was fitted using static calibration datasets. In dynamic MP4 recordings, compression, motion, and slight camera/scene differences may change pixel-distance values.
+
+Future work should compare:
+
+PNG-based distance estimates,
+MP4-based distance estimates,
+Unity ground-truth positions,
+LED world positions.
+9. Next Development Tasks
+9.1 Analyze video observation log
+
+Create:
+
+scripts/14_analyze_video_observation_log.py
+
+Input:
+
+outputs/BackOnly_Dynamic_Test_01/video_observation_log.csv
+
+Metrics:
+
+valid / invalid ratio,
+held observation ratio,
+reason distribution,
+error_x min/max/mean,
+estimated_distance min/max/mean,
+pixel_distance min/max/mean,
+candidate count distribution.
+9.2 Render debug overlay video
+
+Create:
+
+scripts/15_render_video_detection_debug.py
+
+Overlay should show:
+
+LED candidate boxes,
+selected LED pair,
+midpoint,
+image center,
+error_norm,
+estimated_distance,
+valid / held / invalid,
+invalid reason.
+
+This will help diagnose why CANDIDATE_COUNT_NOT_2, LOW_CONFIDENCE, or PAIR_NOT_FOUND occurred.
+
+9.3 Improve candidate pair selection
+
+Replace the strict candidate_count == 2 assumption with pair scoring.
+
+Candidate pair score can use:
+
+LED area similarity,
+vertical alignment,
+distance continuity from previous frame,
+reasonable pixel-distance range,
+temporal stability,
+pattern consistency.
+9.4 Improve hold logic
+
+Current hold logic uses a fixed duration:
+
+hold_seconds = 0.35
+
+Future hold should depend on reason:
+
+BIT_OFF → longer hold allowed
+LOW_CONFIDENCE → short hold
+CANDIDATE_COUNT_NOT_2 → short hold if previous observation is stable
+PAIR_NOT_FOUND → very short hold or STOP
+long occlusion → STOP
+9.5 Improve Linux controller
+
+Future controller script:
+
+06_live_udp_to_mavlink_controller.py
+
+Possible additions:
+
+yaw deadband,
+forward deadband,
+EMA command smoothing,
+acceleration limiting,
+confidence-based gain scaling,
+explicit state machine:
+TRACK
+ALIGN_ONLY
+INVALID
+PACKET_TIMEOUT
+STOP
+SEARCH
+9.6 Move to live Unity/Unreal render
+
+The next major step is to replace offline MP4 input with live image capture.
+
+Possible script:
+
+scripts/16_live_unity_window_sender.py
+
+Target future pipeline:
+
+Unity or Unreal live render
+→ OpenCV frame processing
+→ UDP observation packet
+→ Linux MAVLink controller
+→ Gazebo/ArduSub follower motion
+
+This will be the first real step toward closed-loop tracking.
+
+
+Progress Update — Clean Constant-ON Video and Controller V2 Validation
+Summary
+
+A new clean dynamic Unity video was recorded using the BACK LEDs in constant-ON mode:
+
+BackOnly_Dynamic_Clean_01_CONSTANT_ON.mp4
+
+The purpose of this dataset was to separate pure tracking/control behavior from blink-pattern related target loss. Unlike the previous blink-pattern video, the BACK LEDs were kept continuously visible so that midpoint tracking, distance estimation, and controller smoothing could be evaluated more clearly.
+
+A new Unity LED mode was added to RovLeds.cs:
+
+forceBackConstantOn = true
+
+When this mode is enabled:
+
+frontLEDs → OFF
+backLEDs  → constant ON
+leftLEDs  → OFF
+rightLEDs → OFF
+
+This allows clean BACK-only tracking tests without binary blink interruption.
+
+Video Dataset
+
+Recorded video:
+
+datasets/videos/BackOnly_Dynamic_Clean_01_CONSTANT_ON.mp4
+
+Video properties:
+
+Resolution : 1920x1080
+FPS        : 60.0
+Frames     : 1201
+Duration   : 20.0167 s
+
+Approximate movement sequence:
+
+1. Initial centered position
+2. Movement to the right in the image
+3. Movement to the left in the image
+4. Forward and backward movement while on the left side
+5. Yaw right / yaw left motion
+6. Final recentering near the image center
+OpenCV Sender V2 Analysis
+
+The video was processed using:
+
+scripts/13_live_back_video_sender_v2.py
+
+with:
+
+allow_more_than_two_candidates = true
+pair_strategy = best
+detection_rate = every video frame
+send_rate = 20 Hz
+
+The generated observation log was analyzed using:
+
+scripts/14_analyze_video_observation_log.py
+
+Main results:
+
+total packets : 401
+valid_count   : 342
+invalid_count : 59
+held_count    : 56
+
+valid_ratio   : 0.853
+invalid_ratio : 0.147
+held_ratio    : 0.140
+
+This satisfies the clean-video target:
+
+valid_ratio   ≥ 0.85
+invalid_ratio ≤ 0.15
+
+The video also contains both horizontal error signs and crosses the desired distance:
+
+error_x range              : -0.7885 to +0.5979
+estimated_distance range   : 2.1356 to 5.4275
+desired controller distance: 3.0
+
+Therefore, this video is suitable for controller-side testing because it can produce both yaw directions and both forward/backward distance-control behavior.
+
+Debug Overlay V2
+
+A new V2-compatible debug overlay script was added:
+
+scripts/15_render_video_detection_debug_v2.py
+
+This script reuses the same pair-selection logic as 13_live_back_video_sender_v2.py, so the green selected LED pair shown in the overlay matches the pair used by the UDP sender.
+
+Generated overlay:
+
+outputs/BackOnly_Dynamic_Clean_01_CONSTANT_ON_v2/debug_overlay_v2.mp4
+
+Visual inspection results:
+
+- The selected green pair corresponds to the correct BACK LED pair.
+- When extra orange candidates appear, the V2 best-pair logic usually keeps the correct pair.
+- At far-left / far-distance regions, detection can temporarily break.
+- The midpoint line is visually consistent with the detected LED pair.
+- The sign of error_x is correct:
+  target right in image → error_x positive
+  target left in image  → error_x negative
+- Final frames show the target moving back toward the image center.
+
+Known issue:
+
+Even in constant-ON mode, some frames are classified as BIT_OFF or PAIR_NOT_FOUND. This does not mean the LEDs physically turned off; it means the HSV mask failed to extract enough valid LED area in those frames. This mostly happens when the robot is far away, near the edge of the image, or during difficult yaw/angle conditions.
+
+
+## Progress Update — Unity Camera Pose Bridge Initial Validation
+
+The Unity `CV_Test_Camera` was connected to a separate UDP pose receiver using port `5008`, while the leader robot kept its own receiver on port `5007`. This separation prevents port conflicts between the manually controlled leader object and the camera/follower visual pose.
+
+The `GazeboDataReceiver` component was added to `CV_Test_Camera` with the following working test configuration:
+
+```text
+Listen Port              = 5008
+Position Scale           = 1
+Force Unity Start Pose   = false
+Use Local Transform      = true
+Keyboard Relative Mode   = true
+
+Interpolation Delay      = 0.025
+Max Buffer Samples       = 120
+
+Use Smoothing            = true
+Position Smooth Time     = 0.045
+Rotation Smooth Speed    = 12
+Position Deadband        = 0.0015
+Rotation Deadband Deg    = 0.05
+```
+
+A Linux-to-Windows UDP test confirmed that Unity receives 9-float pose packets on port `5008` and that `CV_Test_Camera` can be moved through the receiver.
+
+The current Linux pose bridge test uses:
+
+```bash
+--rate 90
+--scale 0.40
+--yaw-only
+```
+
+Initial observation:
+
+```text
+- UDP 5008 communication works.
+- CV_Test_Camera moves from external pose packets.
+- Yaw direction appears to be correctly matched between Gazebo and Unity.
+- Position axes are not yet fully aligned.
+```
+
+Important note:
+
+The next required calibration step is to fix the translation-axis mapping between Gazebo/MAVLink `LOCAL_POSITION_NED` and Unity camera motion. Yaw mapping should be preserved for now because the observed yaw direction is currently correct.
+
+
+
+## Live Unity Capture and Yaw-Aware Detection Tests
+
+A live Unity Game View capture pipeline was tested using `16_live_unity_window_sender.py`.
+
+The selected capture region for the current 2K monitor setup is:
+
+```text
+--region-left 318
+--region-top 206
+--region-width 1922
+--region-height 1082
+```
+
+This region captures the Unity Game View / camera image while excluding most editor UI elements.
+
+## Confirmed Live Capture Pipeline
+
+The following chain was validated:
+
+```text
+Unity Game View
+→ screen capture with mss
+→ OpenCV LED candidate detection
+→ BACK LED pair selection
+→ observation packet generation
+→ optional UDP output to Linux controller
+```
+
+The live sender can be used in two modes:
+
+```text
+1. Preview / log-only mode:
+   Used for visual debugging without sending UDP packets.
+
+2. UDP sender mode:
+   Used for closed-loop controller testing.
+```
+
+## Important Detection Parameter Decision
+
+The default distance confidence threshold was too strict for live yaw tests.
+
+During yaw motion, the projected LED pixel distance can drop below approximately 35 px because of perspective / foreshortening. With the previous confidence model, this caused many frames to become `LOW_CONFIDENCE`.
+
+The selected live yaw detection setting is:
+
+```text
+--min-distance-confidence 0.40
+```
+
+This setting must also match the controller-side threshold:
+
+```text
+controller --min-distance-confidence 0.40
+```
+
+Otherwise, the sender may mark packets as valid while the controller rejects them as `LOW_DISTANCE_CONFIDENCE`.
+
+## Rejected / Not Selected Setting
+
+The following setting was tested:
+
+```text
+--on-area-threshold 20
+```
+
+It did not become the selected baseline. Lowering the area threshold can admit extra weak/noisy candidates and may increase pair instability. The current preferred behavior is to keep the default area threshold and only use:
+
+```text
+--min-distance-confidence 0.40
+```
+
+## BIT_OFF Interpretation
+
+In the current constant-ON LED test mode, `BIT_OFF` should not be interpreted as “the LED pattern is intentionally off.”
+
+For these live constant-ON tests, `BIT_OFF` usually means:
+
+```text
+- total detected LED candidate area is below the threshold, or
+- no usable LED blob was detected in that frame, or
+- the target moved close to/outside the camera field of view.
+```
+
+Therefore, `BIT_OFF` is currently a detection-loss reason, not a real blink-pattern state.
+
+## Moving Yaw Debug Findings
+
+Large yaw commands caused the target to move near the edge of the camera image or outside the field of view.
+
+Observed behavior:
+
+```text
+r=80, duration=3.0 s:
+  Too aggressive. Target left the field of view.
+
+r=20, duration=1.0 s:
+  Still too large. Target moved close to the image edge.
+
+r=8, duration=0.5 s:
+  Target stayed inside the image.
+  BACK LED pair remained mostly detectable.
+```
+
+Conclusion:
+
+```text
+The OpenCV detection is mostly stable if the target stays inside the camera view.
+The major detection failures during earlier closed-loop tests were caused by overly large yaw motion pushing the target toward/outside the field of view.
+```
+
+## Current Vision-Side Baseline
+
+For live closed-loop yaw tests, use:
+
+```text
+--allow-more-than-two-candidates
+--pair-strategy best
+--min-distance-confidence 0.40
+```
+
+Keep the current crop region unless the Unity Game View layout changes.
+
+## Remaining Vision-Side Notes
+
+1. During yaw, the estimated distance can become artificially large because the BACK LED pair is viewed at an angle and the projected pixel distance becomes smaller.
+2. This is a foreshortening effect, not necessarily real forward/backward motion.
+3. Forward control should therefore be added carefully with yaw gating.
+4. Future work may include angle-aware distance correction or using distance only when the target is near-frontal.
