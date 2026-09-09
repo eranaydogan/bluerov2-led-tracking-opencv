@@ -1,3 +1,4 @@
 opencv-python
 numpy
-pandasmss
+pandas
+mss
