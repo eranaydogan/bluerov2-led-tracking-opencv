@@ -1,85 +1,268 @@
-# BlueROV2 LED-Based Tracking with OpenCV
+# BlueROV2 LED-Based Visual Tracking & Perception
 
-This repository contains the Python/OpenCV scripts and Unity LED control script used for testing a LED-based visual tracking approach for BlueROV2.
+Computer-vision and perception pipeline for a BlueROV2 visual-following system.
 
-The goal is to detect LED patterns from Unity-rendered image sequences, identify the visible robot face, estimate relative distance using the pixel distance between two LEDs on the same face, and generate controller-ready observation packets for the Linux-side control module.
+The project detects LED markers attached to a leader robot, estimates target alignment and relative distance, and generates controller-ready observations that can be streamed over UDP to a separate Linux control system.
 
----
+This repository contains the **vision / perception subsystem** of the TÜBİTAK 2209-A supported graduation project:
 
-## Project Goal
+**BlueROV2 LED-Based Target Tracking System & Distributed Co-Simulation**
 
-The BlueROV2 model has 8 LEDs in total:
+The corresponding control-side repository is:
 
-* 2 LEDs on the front face
-* 2 LEDs on the back face
-* 2 LEDs on the left face
-* 2 LEDs on the right face
-
-Each face emits a unique binary pattern. The two LEDs on the same face use the same pattern and the same phase.
-
-This allows the vision system to:
-
-1. detect candidate LED blobs,
-2. decode the temporal blink pattern,
-3. verify the visible face,
-4. find the two LEDs belonging to the same face,
-5. compute the midpoint of the LED pair,
-6. calculate image-center alignment error,
-7. estimate distance using the pixel distance between the two LEDs,
-8. generate a controller-ready observation packet.
-
-Color is used only as an initial candidate detection cue. It is not treated as the primary decision factor because HSV-based color detection is sensitive to underwater lighting, bloom, reflections, camera angle, and distance.
-
-The main verification layers are:
-
-1. temporal pattern matching,
-2. two-LED geometric consistency,
-3. temporal stability,
-4. color consistency as a secondary cue.
+➡️ [bluerov2-led-control](https://github.com/eranaydogan/bluerov2-led-control)
 
 ---
 
-## Current Development Stage
-
-The current controlled test focuses on the back face of the robot.
-
-This is the most important initial case because the main following scenario assumes that the follower robot observes the rear side of the leader robot.
-
-Current back-face setup:
+## System Overview
 
 ```text
-Active face: back only
-LED color: green
-Pattern: 11001100
-FPS: 60
-Bit duration: 0.1 s
-Frames per bit: 6
+Unity Game View / recorded visual input
+                ↓
+        Live screen capture / video
+                ↓
+        OpenCV image processing
+                ↓
+        LED candidate detection
+                ↓
+        LED pair selection
+                ↓
+   Target midpoint + image-center error
+                ↓
+      Relative distance estimation
+                ↓
+     Observation validation / hold logic
+                ↓
+        UDP observation packet
+                ↓
+       Linux control subsystem
+                ↓
+       MAVLink / ArduSub / Gazebo
 ```
 
-The two back LEDs blink with the same pattern and the same phase.
+The repository evolved from controlled PNG-sequence experiments into a live perception pipeline capable of capturing the Unity Game View, processing observations in real time, and transmitting them to the control subsystem.
 
 ---
 
-## Current Pipeline
+## Main Capabilities
 
-The current processing pipeline consists of the following stages:
+### LED-Based Target Detection
+
+The current tracking configuration focuses on the **BACK face** of the leader BlueROV2.
+
+The perception pipeline:
+
+- extracts LED candidates using HSV-based segmentation,
+- evaluates candidate geometry,
+- selects the most plausible LED pair,
+- calculates the pair midpoint,
+- computes normalized image-center error,
+- estimates relative distance from LED pixel spacing,
+- assigns detection and distance confidence,
+- maintains short-term observations during temporary detection loss.
+
+The system also supports candidate-pair selection when more than two possible blobs are visible.
+
+---
+
+### Relative Distance Estimation
+
+Distance is estimated from the apparent pixel spacing between the two LEDs.
+
+The calibrated model is:
 
 ```text
-PNG frame sequence
+estimated_distance = 168.628584 / pixel_distance + 0.609526
+```
+
+Calibration performance:
+
+```text
+Mean Absolute Error : 0.116
+RMSE                : 0.131
+```
+
+The model is intended as a relative control cue rather than a high-precision metric localization system.
+
+---
+
+### Controller-Ready Observation Output
+
+The perception side produces observations containing fields such as:
+
+```text
+valid
+face_id
+pattern_accuracy
+distance_confidence
+error_norm
+pixel_distance
+estimated_distance
+held_observation
+udp_seq
+```
+
+Example:
+
+```json
+{
+  "valid": true,
+  "face_id": "BACK",
+  "pattern_accuracy": 1.0,
+  "error_norm": [-0.0729, -0.0287],
+  "pixel_distance": 74.0068,
+  "estimated_distance": 2.8881,
+  "distance_confidence": 1.0
+}
+```
+
+The observation packet is streamed over UDP to the Linux-side controller.
+
+---
+
+## Live Unity Perception
+
+The project currently supports live capture of the Unity Game View using `mss`.
+
+Validated pipeline:
+
+```text
+Unity Game View
+→ screen capture
+→ OpenCV LED detection
+→ LED pair selection
+→ observation generation
+→ UDP streaming
+```
+
+The live sender supports:
+
+- configurable screen-capture regions,
+- real-time OpenCV processing,
+- LED candidate visualization,
+- selected-pair visualization,
+- normalized image error calculation,
+- relative distance estimation,
+- CSV logging,
+- UDP transmission,
+- temporary observation holding,
+- configurable confidence thresholds.
+
+The current main live script is:
+
+```text
+scripts/18_live_unity_window_sender.py
+```
+
+---
+
+## Emergency LED Pattern Detection
+
+The latest live perception stage also contains a separate **red emergency LED detector**.
+
+This logic:
+
+1. detects red pixels independently from the normal green tracking pipeline,
+2. stores detections in a time-based sliding window,
+3. evaluates ON/OFF transitions,
+4. checks the active-time fraction,
+5. distinguishes a flashing emergency signal from continuously visible red objects,
+6. sends an `ASCEND` command over UDP when the emergency pattern is confirmed.
+
+The emergency detection logic is intentionally separate from the primary tracking pipeline.
+
+---
+
+## Detection Performance
+
+A clean constant-ON dynamic Unity video was evaluated using the V2 perception pipeline.
+
+Results:
+
+```text
+Total observations : 401
+Valid              : 342
+Invalid            : 59
+Held               : 56
+
+Valid ratio        : 0.853
+Invalid ratio      : 0.147
+Held ratio         : 0.140
+```
+
+Observed target ranges included:
+
+```text
+Normalized horizontal error : -0.7885 to +0.5979
+Estimated distance          : 2.1356 to 5.4275
+```
+
+This dataset provided both left/right image-error directions and distances above and below the desired following distance, making it suitable for controller testing.
+
+---
+
+## Development Progression
+
+The perception pipeline was developed incrementally:
+
+```text
+PNG sequence experiments
         ↓
-LED candidate extraction
+LED pair detection
         ↓
-Back LED pair detection
+Temporal pattern analysis
         ↓
-Frame-level ON/OFF bit extraction
+Distance calibration
         ↓
-Pattern decoding and global pattern accuracy
+Static observation packet
         ↓
-Pixel-distance based range estimation
+Local UDP test
         ↓
-Midpoint / image error / camera ray calculation
+Windows → Linux UDP streaming
         ↓
-Controller-ready JSON observation packet
+PNG-sequence live sender
+        ↓
+MP4 video sender
+        ↓
+V2 pair-selection and hold logic
+        ↓
+Debug-overlay and log analysis
+        ↓
+Live Unity Game View capture
+        ↓
+Emergency LED pattern detection
+```
+
+---
+
+## Main Scripts
+
+| Script | Purpose |
+|---|---|
+| `01_preview_png_sequence.py` | Preview Unity-generated PNG sequences |
+| `03_hsv_tuner.py` | Tune HSV thresholds for LED extraction |
+| `04_back_pair_distance_extract.py` | Detect the BACK LED pair and extract geometric measurements |
+| `05_back_pattern_decode.py` | Analyze temporal LED pattern consistency |
+| `06_back_distance_analysis.py` | Analyze pixel-distance measurements |
+| `07_distance_model.py` | Fit and evaluate the LED-spacing distance model |
+| `08_generate_observation_packet.py` | Generate controller-ready observation packets |
+| `09_udp_send_observation.py` | Test UDP observation transmission |
+| `10_udp_receive_observation.py` | Test UDP observation reception |
+| `11_replay_back_observation_from_csv.py` | Replay observations from processed CSV data |
+| `12_live_back_png_sequence_sender.py` | Process PNG frames and stream observations over UDP |
+| `13_live_back_video_sender.py` | Process recorded MP4 video |
+| `13_live_back_video_sender_v2.py` | Improved video perception and pair-selection pipeline |
+| `14_analyze_video_observation_log.py` | Analyze observation logs |
+| `15_render_video_detection_debug.py` | Render detection-debug overlays |
+| `15_render_video_detection_debug_v2.py` | V2-compatible debug visualization |
+| `16_live_unity_window_sender.py` | Initial live Unity Game View capture |
+| `17_select_capture_region.py` | Select the Unity screen-capture region |
+| `18_live_unity_window_sender.py` | Current live perception sender with emergency pattern detection |
+
+Older experimental scripts are preserved under:
+
+```text
+scripts/legacy/
 ```
 
 ---
@@ -92,27 +275,21 @@ Controller-ready JSON observation packet
 ├── requirements.txt
 ├── .gitignore
 │
-├── unity/
-│   └── RovLeds.cs
-│
 ├── scripts/
 │   ├── 01_preview_png_sequence.py
-│   ├── 03_hsv_tuner.py
-│   ├── 04_back_pair_distance_extract.py
-│   ├── 05_back_pattern_decode.py
-│   ├── 06_back_distance_analysis.py
-│   ├── 07_distance_model.py
-│   ├── 08_generate_observation_packet.py
+│   ├── ...
+│   ├── 18_live_unity_window_sender.py
 │   └── legacy/
-│       ├── 02_led_detection_test.py
-│       ├── 04_extract_led_on_off.py
-│       └── 05_decode_pattern.py
 │
 ├── docs/
-│   ├── progress_log.md
 │   ├── calibration_log.md
 │   ├── dataset_notes.md
-│   └── next_steps.md
+│   ├── next_steps.md
+│   ├── progress_log.md
+│   └── project_task_board.md
+│
+├── unity/
+│   └── RovLeds.cs
 │
 ├── datasets/
 │   └── .gitkeep
@@ -121,62 +298,13 @@ Controller-ready JSON observation packet
     └── .gitkeep
 ```
 
----
-
-## Dataset Policy
-
-PNG frame sequences are not stored directly in this repository because they are large.
-
-Datasets should be stored externally, for example in Google Drive or OneDrive, as ZIP files. The folder structure should be preserved.
-
-Local dataset folders should be placed under:
-
-```text
-datasets/
-```
-
-Example:
-
-```text
-datasets/
-├── BackOnly_Test_01/
-├── BackOnly_Test_02/
-├── BackOnly_Test_03/
-├── BackOnly_Test_04/
-├── BackOnly_Test_05/
-└── BackOnly_Test_06/
-```
-
-Each dataset folder should contain the PNG frame sequence generated by Unity Recorder.
-
-Generated CSV and JSON outputs are written under:
-
-```text
-outputs/
-```
-
-Example:
-
-```text
-outputs/
-├── BackOnly_Test_04/
-│   ├── back_pair_results.csv
-│   ├── back_pair_distance_filtered.csv
-│   ├── back_pattern_decode_summary.json
-│   └── observation_packet_frame_120.json
-│
-└── calibration/
-    ├── distance_model_summary.json
-    └── distance_model_evaluation.csv
-```
-
-The `datasets/` and `outputs/` folders are ignored by Git except for `.gitkeep`.
+Large datasets, videos and generated output files are intentionally excluded from the repository.
 
 ---
 
 ## Installation
 
-Create and activate a Python virtual environment:
+Create a virtual environment:
 
 ```powershell
 python -m venv .venv
@@ -189,260 +317,97 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
----
-
-## Running the Current Back-Only Pipeline
-
-### 1. Preview the PNG sequence
-
-```powershell
-python .\scripts\01_preview_png_sequence.py
-```
-
-### 2. Tune HSV values
-
-```powershell
-python .\scripts\03_hsv_tuner.py
-```
-
-### 3. Extract back LED pair data
-
-```powershell
-python .\scripts\04_back_pair_distance_extract.py
-```
-
-This script reads PNG frames from:
+Dependencies:
 
 ```text
-datasets/<DATASET_NAME>/
-```
-
-and writes:
-
-```text
-outputs/<DATASET_NAME>/back_pair_results.csv
-```
-
-The generated CSV includes:
-
-* frame index,
-* LED candidate count,
-* ON/OFF bit value,
-* pair_found flag,
-* LED center coordinates,
-* pixel distance,
-* LED pair midpoint,
-* normalized image-center error,
-* camera ray direction,
-* image width and height.
-
-### 4. Decode the back LED pattern
-
-```powershell
-python .\scripts\05_back_pattern_decode.py BackOnly_Test_04
-```
-
-The decoder reports:
-
-* local 8-bit best pattern score,
-* global repeated-pattern accuracy,
-* bit error count,
-* bit error rate,
-* best global shift.
-
-This is important because a local score of `1.0` only proves that the expected pattern exists somewhere in the decoded sequence. The global accuracy shows whether the entire decoded sequence is reliable.
-
-### 5. Analyze filtered LED pair distance
-
-```powershell
-python .\scripts\06_back_distance_analysis.py
-```
-
-The current reliable-frame condition is:
-
-```text
-bit == 1
-pair_found == 1
-candidate_count == 2
-pixel_distance is not null
-```
-
-This avoids using frames where false positives or split LED blobs create unreliable pair measurements.
-
-### 6. Fit the distance model
-
-```powershell
-python .\scripts\07_distance_model.py
-```
-
-The current fitted model is:
-
-```text
-estimated_distance = 168.628584 / pixel_distance + 0.609526
-```
-
-Current model performance:
-
-```text
-Mean absolute error: 0.116 unit
-RMSE: 0.131 unit
-```
-
-This model is intended as a first controller-side distance cue, not as a final metric localization system.
-
-### 7. Generate a controller-ready observation packet
-
-```powershell
-python .\scripts\08_generate_observation_packet.py BackOnly_Test_04
-```
-
-This generates a JSON packet from the first valid observation.
-
-A specific frame can also be requested:
-
-```powershell
-python .\scripts\08_generate_observation_packet.py BackOnly_Test_04 120
-```
-
-If the requested frame is not valid, the nearest valid observation is selected.
-
-Example packet:
-
-```json
-{
-    "dataset": "BackOnly_Test_04",
-    "requested_frame": 120,
-    "selected_frame_delta": 0,
-    "frame": 120,
-    "valid": true,
-    "face_id": "BACK",
-    "pattern": "11001100",
-    "pattern_accuracy": 1.0,
-    "bit_error_count": 0,
-    "bit_error_rate": 0.0,
-    "pair_found": true,
-    "candidate_count": 2,
-    "led1_px": [853.0, 555.0],
-    "led2_px": [927.0, 556.0],
-    "midpoint_px": [890.0, 555.5],
-    "error_norm": [-0.0729, -0.0287],
-    "ray_cam": [-0.0746, -0.0165, 0.9971],
-    "pixel_distance": 74.0068,
-    "estimated_distance": 2.8881,
-    "distance_confidence": 1.0,
-    "image_size": [1920, 1080]
-}
+opencv-python
+numpy
+pandas
+mss
 ```
 
 ---
 
-## Calibration Results
+## Running the Live Unity Sender
 
-Current back-only calibration results:
+First select or determine the Unity Game View capture region:
 
-| Test name        | Approx. distance | Pattern accuracy | Median pixel distance | Distance std | Notes                 |
-| ---------------- | ---------------: | ---------------: | --------------------: | -----------: | --------------------- |
-| BackOnly_Test_01 |             1.47 |             1.00 |                168 px |      0.61 px | Initial reference     |
-| BackOnly_Test_02 |             2.00 |             1.00 |                118 px |     0.002 px | Stable                |
-| BackOnly_Test_03 |             2.50 |             1.00 |                 92 px |      0.74 px | Usable                |
-| BackOnly_Test_04 |             3.00 |             1.00 |              73.06 px |      0.82 px | Clean fixed-axis test |
-| BackOnly_Test_05 |             4.00 |             1.00 |                 53 px |      0.67 px | Clean fixed-axis test |
-| BackOnly_Test_06 |             5.00 |             0.99 |                 37 px |      2.24 px | Far-range boundary    |
-
-The results show the expected inverse relationship:
-
-```text
-larger camera-target distance → smaller LED pixel distance
+```powershell
+python .\scripts\17_select_capture_region.py
 ```
 
-At around 5 Unity units, the LED pattern is still detectable, but the pixel-distance measurement becomes noisier because the LED pair appears much smaller in the image.
+Then run the live perception pipeline:
 
----
-
-## Current Design Decisions
-
-### 1. Same-face LEDs use the same pattern and phase
-
-The two LEDs on the same face blink with the same binary pattern and the same phase.
-
-This allows the vision system to:
-
-* verify that two detected blobs belong to the same face,
-* compute a stable midpoint,
-* estimate distance from pixel spacing.
-
-### 2. Color is not the primary decision factor
-
-HSV color filtering is used for candidate extraction only.
-
-The final decision should rely more on:
-
-* pattern consistency,
-* two-LED geometry,
-* temporal stability,
-* confidence score.
-
-### 3. Distance is reliable mainly for near-frontal face views
-
-Pixel-distance based range estimation is most reliable when the observed face is approximately frontal.
-
-In diagonal or multi-face views, distance confidence should be reduced and the controller should rely more on midpoint, ray, face ID, and confidence values.
-
-### 4. Multi-face views should produce per-face observations
-
-For diagonal views where multiple faces are visible, the system should not average all visible LEDs into one global point.
-
-Instead, it should generate one observation per visible face:
-
-```text
-BACK observation
-RIGHT observation
-LEFT observation
-FRONT observation
+```powershell
+python .\scripts\18_live_unity_window_sender.py `
+  --region-left <LEFT> `
+  --region-top <TOP> `
+  --region-width <WIDTH> `
+  --region-height <HEIGHT> `
+  --ip <CONTROL_PC_IP> `
+  --port 5005 `
+  --rate 20 `
+  --preview `
+  --allow-more-than-two-candidates `
+  --pair-strategy best `
+  --min-distance-confidence 0.40
 ```
 
-Then a primary face and optional secondary face can be selected based on confidence.
+For perception-only testing without UDP output:
 
----
-
-## Controller-Side Observation Fields
-
-The current JSON observation packet is designed as a debugging-friendly prototype for the Linux-side controller.
-
-Important fields:
-
-| Field                 | Meaning                                             |
-| --------------------- | --------------------------------------------------- |
-| `valid`               | Whether this observation should be used             |
-| `face_id`             | Detected face, currently `BACK`                     |
-| `pattern_accuracy`    | Global repeated-pattern reliability                 |
-| `bit_error_rate`      | Fraction of decoded bits that are wrong             |
-| `midpoint_px`         | Pixel midpoint of the detected LED pair             |
-| `error_norm`          | Normalized image-center error                       |
-| `ray_cam`             | Camera-frame ray toward the LED pair midpoint       |
-| `pixel_distance`      | Raw pixel spacing between the two LEDs              |
-| `estimated_distance`  | Distance estimate from the fitted calibration model |
-| `distance_confidence` | Heuristic confidence for the distance estimate      |
-
-For the first controller prototype:
-
-```text
-error_norm[0] → horizontal/yaw correction
-error_norm[1] → vertical/depth or pitch correction
-estimated_distance → forward/backward distance control
-valid + confidence fields → controller gating
+```powershell
+python .\scripts\18_live_unity_window_sender.py `
+  --region-left <LEFT> `
+  --region-top <TOP> `
+  --region-width <WIDTH> `
+  --region-height <HEIGHT> `
+  --preview `
+  --skip-send
 ```
 
 ---
 
-## Next Steps
+## Current Limitations
 
-1. Use the JSON observation packet as the first debugging payload.
-2. Implement UDP transmission from the Windows/OpenCV side.
-3. Implement a simple UDP receiver on the Linux/control side.
-4. First test UDP locally, then Windows → Linux.
-5. Later convert JSON to a compact binary packet if latency or bandwidth becomes a problem.
-6. Extend the pipeline from back-only tracking to multi-face detection.
-7. Add stronger candidate-pair selection when `candidate_count > 2`.
-8. Add temporal tracking for LED candidates.
-9. Generate per-face observations for diagonal/multi-face views.
+The current implementation still has several research and engineering limitations:
+
+- BACK-face tracking is substantially more developed than multi-face tracking.
+- Pixel-spacing distance estimation is affected by viewing angle and foreshortening.
+- Distance estimates can become artificially large during strong yaw angles.
+- HSV-based segmentation remains sensitive to lighting, reflections and target scale.
+- Target loss can occur when the robot approaches the image boundary.
+- Emergency LED thresholds are currently tuned for the simulation environment.
+- Full multi-face FRONT / BACK / LEFT / RIGHT perception is not yet implemented.
+
+These limitations are part of the ongoing development toward more robust visual following.
+
+---
+
+## Related Control Repository
+
+The control subsystem is maintained separately:
+
+### [BlueROV2 Visual Control & MAVLink Integration](https://github.com/eranaydogan/bluerov2-led-control)
+
+It receives perception observations over UDP and handles:
+
+- observation validation,
+- forward and yaw control,
+- command smoothing,
+- rate limiting,
+- MAVLink `MANUAL_CONTROL`,
+- ArduSub SITL integration,
+- Gazebo BlueROV2 motion,
+- safe STOP and DISARM behavior.
+
+Keeping perception and control in separate repositories reflects the distributed architecture used during development.
+
+---
+
+## Project Context
+
+**Graduation Project**  
+**Funded by TÜBİTAK 2209-A**  
+**Role: Project Lead**
+
+The broader project explores visual target tracking, distributed simulation and autonomous following for underwater robotic systems using BlueROV2.
