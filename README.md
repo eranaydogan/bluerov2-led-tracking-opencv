@@ -14,6 +14,31 @@ The corresponding control-side repository is:
 
 ---
 
+## Demo & Results
+
+### 3D Mission Replay
+
+![BlueROV2 3D mission replay](docs/media/mission_replay_3d.gif)
+
+Logged leader and follower poses reconstructed as a 3D mission replay.
+The visualization shows trajectory history, vehicle heading, relative separation,
+depth, target distance, and the emergency ASCEND transition.
+
+During the tracking phase:
+
+- Mean leader–follower distance: **4.97 m**
+- Maximum leader–follower distance: **5.74 m**
+
+Tracking metrics exclude the emergency ASCEND phase because the follower
+intentionally leaves the leader after the failsafe is triggered.
+
+### Full Visual Tracking Demo
+
+▶️ [Watch the full tracking demo](docs/media/full_tracking_demo.mp4)
+
+The full simulation recording shows the follower maintaining visual tracking
+of the leader while maneuvering through the Unity environment.
+
 ## System Overview
 
 ```text
