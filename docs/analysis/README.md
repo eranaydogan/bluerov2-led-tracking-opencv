@@ -19,6 +19,7 @@ The pose logs contain timestamped position and yaw measurements:
 
 ```text
 time_s, x, y, z, yaw
+```
 
 Position logs are converted from Unity units to meters during analysis.
 
