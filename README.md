@@ -340,7 +340,8 @@ scripts/legacy/
     └── .gitkeep
 ```
 
-Large datasets, videos and generated output files are intentionally excluded from the repository.
+Large raw datasets and transient generated outputs are excluded from the repository.
+Selected demo media, trajectory logs, and analysis artifacts are included under `docs/`.
 
 ---
 
