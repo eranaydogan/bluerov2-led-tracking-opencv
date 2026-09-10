@@ -32,6 +32,8 @@ During the tracking phase:
 Tracking metrics exclude the emergency ASCEND phase because the follower
 intentionally leaves the leader after the failsafe is triggered.
 
+📊 [View analysis code, trajectory logs, plots, and interactive dashboard](docs/analysis/)
+
 ### Full Visual Tracking Demo
 
 ▶️ [Watch the full tracking demo](docs/media/full_tracking_demo.mp4)
