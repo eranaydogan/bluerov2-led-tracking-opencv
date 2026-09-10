@@ -309,11 +309,26 @@ scripts/legacy/
 │   └── legacy/
 │
 ├── docs/
+│   ├── media/
+│   │   ├── mission_replay_3d.gif
+│   │   └── full_tracking_demo.mp4
+│   │
+│   ├── analysis/
+│   │   ├── README.md
+|   |   ├── requirements.txt
+│   │   ├── path_analysis.py
+│   │   ├── path_analysis_dashboard.html
+│   │   ├── leader_path_log.csv
+│   │   ├── follower_path_log.csv
+│   │   ├── gps_surface_log.csv
+│   │   └── path_analysis_*.png
+│   │
 │   ├── calibration_log.md
 │   ├── dataset_notes.md
 │   ├── next_steps.md
 │   ├── progress_log.md
 │   └── project_task_board.md
+|    
 │
 ├── unity/
 │   └── RovLeds.cs
