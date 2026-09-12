@@ -28,3 +28,8 @@ outputs/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Keep selected YOLO experiment artifacts
+!experiments/yolo-detector/results/results.csv
+!experiments/yolo-detector/results/results.png
+!experiments/yolo-detector/media/unreal_detection_demo.mp4

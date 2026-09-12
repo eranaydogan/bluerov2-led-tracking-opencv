@@ -1,0 +1,45 @@
+# Sanitized configuration record from the original YOLOv8s training run.
+# Machine-specific paths and output directories were intentionally removed.
+
+task: detect
+model: yolov8s.pt
+data: configs/data.yaml
+
+epochs: 80
+patience: 20
+batch: 0
+imgsz: 640
+
+pretrained: true
+optimizer: auto
+
+seed: 0
+deterministic: true
+
+cos_lr: true
+close_mosaic: 10
+amp: true
+
+lr0: 0.01
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+
+# Augmentation configuration used during training.
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+
+translate: 0.05
+scale: 0.2
+shear: 1.5
+
+fliplr: 0.5
+
+mosaic: 0.2
+mixup: 0.1
+erasing: 0.4

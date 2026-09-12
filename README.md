@@ -228,11 +228,40 @@ This dataset provided both left/right image-error directions and distances above
 
 ---
 
+## Experimental Perception Approaches
+
+The perception architecture evolved significantly during development.
+
+Before the final LED-specific OpenCV pipeline became the primary approach, a
+YOLOv8-based object detector was fine-tuned to detect the complete BlueROV2
+vehicle and evaluated on recorded simulation footage, including an Unreal
+Engine visual-simulation prototype.
+
+The experimental detector extracted the highest-confidence bounding-box center
+`(u, v)` and its offset from the image center. This image-space target
+representation later carried over conceptually into the controller-ready
+normalized image-error observations used by the final LED-based perception
+pipeline.
+
+The YOLO approach was not part of the final closed-loop runtime architecture.
+The project later prioritized LED-specific perception because the visual
+following task also required temporal LED behavior, LED-pair geometry, and
+relative-distance estimation.
+
+Training configuration, validation results, inference code, and the Unreal
+Engine detection demo are preserved here:
+
+➡️ [Experimental YOLOv8 BlueROV2 Detector](experiments/yolo-detector/)
+
 ## Development Progression
 
 The perception pipeline was developed incrementally:
 
 ```text
+Early YOLOv8 BlueROV2 detection prototype
+        ↓
+Unreal Engine inference evaluation
+        ↓
 PNG sequence experiments
         ↓
 LED pair detection
@@ -259,6 +288,11 @@ Live Unity Game View capture
         ↓
 Emergency LED pattern detection
 ```
+
+The project began with broader object-level perception experiments before
+progressively moving toward task-specific LED perception. The final pipeline
+prioritized lightweight geometric and temporal LED processing for visual
+following, relative-distance estimation, and controller integration.
 
 ---
 
@@ -307,6 +341,21 @@ scripts/legacy/
 │   ├── ...
 │   ├── 18_live_unity_window_sender.py
 │   └── legacy/
+│
+├── experiments/
+│   └── yolo-detector/
+│       ├── README.md
+│       ├── requirements.txt
+│       ├── configs/
+│       │   ├── data.yaml
+│       │   └── training_config.yaml
+│       ├── scripts/
+│       │   └── predict_video.py
+│       ├── results/
+│       │   ├── results.csv
+│       │   └── results.png
+│       └── media/
+│           └── unreal_detection_demo.mp4
 │
 ├── docs/
 │   ├── media/

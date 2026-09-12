@@ -1,0 +1,22 @@
+# BlueROV2 detection dataset used for the experimental YOLOv8 detector.
+#
+# The dataset itself is not distributed with this repository.
+# Downloaded dataset files should be placed under:
+# data/bluerov_v4/
+
+path: data/bluerov_v4
+
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names:
+  - BlueROV2
+
+roboflow:
+  workspace: rovdetection
+  project: bluerov-detection
+  version: 4
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/rovdetection/bluerov-detection/dataset/4
